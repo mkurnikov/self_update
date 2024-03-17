@@ -233,7 +233,7 @@ pub struct UpdateBuilder {
     target: Option<String>,
     identifier: Option<String>,
     bin_name: Option<String>,
-    bin_install_path: Option<PathBuf>,
+    bin_install_dir: Option<PathBuf>,
     bin_path_in_archive: Option<PathBuf>,
     show_download_progress: bool,
     show_output: bool,
@@ -307,7 +307,11 @@ impl UpdateBuilder {
         self
     }
 
-    /// Set the exe's name. Also sets `bin_path_in_archive` if it hasn't already been set.
+    /// Set the existing exe's name. Also sets `bin_path_in_archive` if it hasn't
+    /// already been set.
+    ///
+    /// This method does not change the name of the executable unless `bin_install_dir`
+    /// is also set.
     ///
     /// This method will append the platform specific executable file suffix
     /// (see `std::env::consts::EXE_SUFFIX`) to the name if it's missing.
@@ -320,16 +324,18 @@ impl UpdateBuilder {
         self
     }
 
-    /// Set the installation path for the new exe, defaults to the current
-    /// executable's path
-    pub fn bin_install_path<A: AsRef<Path>>(&mut self, bin_install_path: A) -> &mut Self {
-        self.bin_install_path = Some(PathBuf::from(bin_install_path.as_ref()));
+    /// Set the installation directory for the new exe. This should be a directory, not
+    /// a file. By setting this, you are opting out of the default behavior of replacing
+    /// the currently running executable and instead opting to install the new binary
+    /// somewhere else.
+    pub fn bin_install_dir<A: AsRef<Path>>(&mut self, bin_install_dir: A) -> &mut Self {
+        self.bin_install_dir = Some(PathBuf::from(bin_install_dir.as_ref()));
         self
     }
 
     /// Set the path of the exe inside the release tarball. This is the location
     /// of the executable relative to the base of the tar'd directory and is the
-    /// path that will be copied to the `bin_install_path`. If not specified, this
+    /// path that will be copied to the `bin_install_dir`. If not specified, this
     /// will default to the value of `bin_name`. This only needs to be specified if
     /// the path to the binary (from the root of the tarball) is not equal to just
     /// the `bin_name`.
@@ -418,11 +424,12 @@ impl UpdateBuilder {
     /// * Errors:
     ///     * Config - Invalid `Update` configuration
     pub fn build(&self) -> Result<Box<dyn ReleaseUpdate>> {
-        let bin_install_path = if let Some(v) = &self.bin_install_path {
-            v.clone()
-        } else {
-            env::current_exe()?
-        };
+        // Assert the path is a directory.
+        if let Some(path) = self.bin_install_dir.as_ref() {
+            if !path.is_dir() {
+                bail!(Error::Config, "`bin_install_dir` must be a directory");
+            }
+        }
 
         Ok(Box::new(Update {
             repo_owner: if let Some(ref owner) = self.repo_owner {
@@ -446,7 +453,7 @@ impl UpdateBuilder {
             } else {
                 bail!(Error::Config, "`bin_name` required")
             },
-            bin_install_path,
+            bin_install_dir: self.bin_install_dir.clone(),
             bin_path_in_archive: if let Some(ref path) = self.bin_path_in_archive {
                 path.to_owned()
             } else {
@@ -481,7 +488,7 @@ pub struct Update {
     current_version: String,
     target_version: Option<String>,
     bin_name: String,
-    bin_install_path: PathBuf,
+    bin_install_dir: Option<PathBuf>,
     bin_path_in_archive: PathBuf,
     show_download_progress: bool,
     show_output: bool,
@@ -574,8 +581,8 @@ impl ReleaseUpdate for Update {
         self.bin_name.clone()
     }
 
-    fn bin_install_path(&self) -> PathBuf {
-        self.bin_install_path.clone()
+    fn bin_install_dir(&self) -> Option<PathBuf> {
+        self.bin_install_dir.clone()
     }
 
     fn bin_path_in_archive(&self) -> PathBuf {
@@ -624,7 +631,7 @@ impl Default for UpdateBuilder {
             target: None,
             identifier: None,
             bin_name: None,
-            bin_install_path: None,
+            bin_install_dir: None,
             bin_path_in_archive: None,
             show_download_progress: false,
             show_output: true,

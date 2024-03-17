@@ -483,8 +483,9 @@ impl ReleaseUpdate for Update {
         self.bin_name.clone()
     }
 
-    fn bin_install_path(&self) -> PathBuf {
-        self.bin_install_path.clone()
+    // TODO: Fix this to match the new behavior.
+    fn bin_install_dir(&self) -> Option<PathBuf> {
+        Some(self.bin_install_path.clone())
     }
 
     fn bin_path_in_archive(&self) -> PathBuf {

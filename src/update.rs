@@ -1,6 +1,8 @@
 use reqwest::{self, header};
 use std::fs;
-use std::path::PathBuf;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 use crate::{confirm, errors::*, version, Download, Extract, Status};
 
@@ -97,8 +99,9 @@ pub trait ReleaseUpdate {
     /// Name of the binary being updated
     fn bin_name(&self) -> String;
 
-    /// Installation path for the binary being updated
-    fn bin_install_path(&self) -> PathBuf;
+    /// Installation directory for the new exe. If set, the new exe will be installed
+    /// here rather than replacing the current exe.
+    fn bin_install_dir(&self) -> Option<PathBuf>;
 
     /// Path of the binary to be extracted from release package
     fn bin_path_in_archive(&self) -> PathBuf;
@@ -153,7 +156,7 @@ pub trait ReleaseUpdate {
 
     /// Same as `update`, but returns `UpdateStatus`.
     fn update_extended(&self) -> Result<UpdateStatus> {
-        let bin_install_path = self.bin_install_path();
+        let bin_install_dir = self.bin_install_dir();
         let bin_name = self.bin_name();
 
         let current_version = self.current_version();
@@ -211,9 +214,11 @@ pub trait ReleaseUpdate {
         let prompt_confirmation = !self.no_confirm();
         if self.show_output() || prompt_confirmation {
             println!("\n{} release status:", bin_name);
-            println!("  * Current exe: {:?}", bin_install_path);
             println!("  * New exe release: {:?}", target_asset.name);
             println!("  * New exe download url: {:?}", target_asset.download_url);
+            if let Some(ref dir) = bin_install_dir {
+                println!("  * Installing to: {}", dir.display());
+            }
             println!("\nThe new release will be downloaded/extracted and the existing binary will be replaced.");
         }
         if prompt_confirmation {
@@ -245,11 +250,30 @@ pub trait ReleaseUpdate {
             .extract_file(tmp_archive_dir.path(), &bin_path_in_archive)?;
         let new_exe = tmp_archive_dir.path().join(&bin_path_in_archive);
 
-        println(show_output, "Done");
+        // Make the new binary executable.
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&new_exe)?;
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&new_exe, permissions)?;
+        }
 
-        print_flush(show_output, "Replacing binary file... ")?;
-        self_replace::self_replace(new_exe)?;
-        println(show_output, "Done");
+        match self.bin_install_dir() {
+            Some(ref dir) => {
+                print_flush(
+                    show_output,
+                    &format!("Moving binary file to {}... ", dir.display()),
+                )?;
+                move_file(&new_exe, dir.join(bin_name))?;
+                println(show_output, "Done");
+            }
+            None => {
+                print_flush(show_output, "Replacing binary file... ")?;
+                self_replace::self_replace(new_exe)?;
+                println(show_output, "Done");
+            }
+        }
 
         Ok(UpdateStatus::Updated(release))
     }
@@ -313,4 +337,18 @@ fn verify_signature(
         }
     }
     Err(Error::NoSignatures(archive_kind))
+}
+
+/// Move a file. This first tries to use std::fs::rename, but if that doesn't
+/// work, e.g. because the destination is on a different filesystem than the
+/// source, it copies the file to the destination and deletes the source file.
+pub fn move_file<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> std::io::Result<()> {
+    match std::fs::rename(&from, &to) {
+        Ok(result) => Ok(result),
+        Err(_) => {
+            std::fs::copy(&from, &to)?;
+            std::fs::remove_file(from)?;
+            Ok(())
+        }
+    }
 }
