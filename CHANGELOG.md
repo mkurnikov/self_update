@@ -5,6 +5,21 @@
 ### Changed
 ### Removed
 
+## [0.41.0]
+### Added
+### Changed
+- Update to zip 2.x
+### Removed
+
+## [0.40.0]
+### Added
+### Changed
+- `Release::asset_for` now searches for current `OS` and `ARCH` inside `asset.name` if `target` failed to match
+- Update `reqwest` to `0.12.0`
+- Update `hyper` to `1.2.0`
+- Support variable substitutions in `bin_path_in_archive` at runtime
+### Removed
+
 ## [0.39.0]
 ### Added
 - Add `signatures` feature to support verifying zip/tar.gz artifacts using [zipsign](https://github.com/Kijewski/zipsign)
